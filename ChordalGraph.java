@@ -1,315 +1,359 @@
 import java.math.BigInteger;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Scanner;
 
 /**
- * Berechnet c(n), die Anzahl zusammenhaengender beschrifteter chordaler
- * Graphen, fuer n = 1..30, mithilfe des Zaehlalgorithmus von
+ * Java-Portierung der offiziellen Referenzimplementierung von
+ * Hébert-Johnson, Lokshtanov und Vigoda:
+ * "Counting and Sampling Labeled Chordal Graphs in Polynomial Time" (ESA 2023).
  *
- *   Hebert-Johnson, Lokshtanov, Vigoda: "Counting and Sampling Labeled
- *   Chordal Graphs in Polynomial Time", ESA 2023, arXiv:2308.09703.
+ * Original C++ Quelle: https://github.com/uhebertj/chordal
  *
- * HERKUNFT DIESES CODES:
- * Diese Klasse ist eine Portierung (C++ -> Java) der von den Autoren selbst
- * veroeffentlichten Referenzimplementierung:
- *   https://github.com/uhebertj/chordal (Datei chordal.cpp)
- * Die Rekursionsstruktur, Variablennamen (g, gTilde, gHat, g1Tilde, g2Tilde,
- * f, fTilde, fHat) und die Grundidee der dynamischen Programmierung wurden
- * direkt aus dieser Quelle uebernommen; lediglich BigInteger anstelle von
- * boost::multiprecision und HashMap-Memoisierung anstelle vorallozierter
- * mehrdimensionaler Arrays wurden verwendet.
+ * Diese Portierung wurde für n = 1..10 gegen die veröffentlichten Werte
+ * validiert (siehe Verifikationsschritt im Begleittext).
  *
- * WARUM DIESER ANSATZ (statt der eigenen einfachen Rekursionsformel):
- * Die in Kapitel 4 hergeleitete Formel a(n) = Summe C(n-1,k-1) c(k) a(n-k)
- * beschreibt zwar korrekt den Zusammenhang zwischen a(n) und c(n), enthaelt
- * jedoch eine zirkulaere Abhaengigkeit (der Term k=n liefert genau c(n)),
- * sodass a(n) und c(n) daraus nicht gleichzeitig berechnet werden koennen.
- * Der hier implementierte Algorithmus berechnet c(n) stattdessen unabhaengig,
- * ueber die "Verdunstungssequenz" (evaporation sequence) eines chordalen
- * Graphen -- eine kanonische Version der perfekten Eliminationsordnung, bei
- * der in jedem Schritt ALLE simplizialen Knoten gleichzeitig entfernt
- * werden (siehe Kapitel 3 fuer simpliziale Knoten und PEO). Die Details der
- * Rekurrenzen (Lemmas 3.4-3.12 der Originalarbeit) und deren Korrektheits-
- * beweise (Section 5) sind sehr umfangreich und gehen ueber den Rahmen
- * dieser Arbeit hinaus; hier wird der Algorithmus als Blackbox verwendet
- * und gegen die publizierten Werte aus Table 1 verifiziert.
- *
- * LAUFZEIT: O(n^7) arithmetische Operationen. Fuer n=30 in der Originalarbeit
- * ca. 2.5 Minuten in C++. Diese Java-Portierung kann je nach Rechner
- * aehnlich lange oder laenger benoetigen. Bei Speicherproblemen (grosse
- * Zwischenergebnisse) kann der Heap mit "java -Xmx4g ChordalGraphPolyTime"
- * vergroessert werden. Auf Online-Compilern mit Zeit-/Speicherlimits
- * (z.B. JDoodle) sollte daher zunaechst mit kleinerem maxN getestet werden.
+ * Achtung: Die Tabellen g, gTilde, gHat und fHat5 sind hochdimensional
+ * (bis zu 5 Dimensionen der Größe n+1). Für n=35 kann dies mehrere GB
+ * Arbeitsspeicher benötigen. Starte das Programm ggf. mit erhöhtem
+ * Heap, z. B.:
+ *     java -Xmx8g ChordalCounter
  */
+public class ChordalCounter {
 
-public class ChordalGraphPolyTime {
+    static int w;
 
-    static int W; // Schranke fuer die maximale Cliquengroesse (hier: unbeschraenkt = n)تذكر من الورقة الأكاديمية: الخوارزمية الأصلية بتحسب "ω-colorable chordal graphs" (يعني غرافات بحد أقصى لحجم الـ Clique = ω). إحنا مش محتاجين هالقيد (بدنا كل الغرافات chordal، بدون حد)، فـ W رح نحطها = n دايماً (يعني "بدون قيد فعلي" - أكبر Clique ممكنة أصلاً هي n).
-    
-    //هاي مصفوفة ثنائية الأبعاد  لتخزين nو k 
-    static BigInteger[][] choose;
+    static BigInteger[][] tableChoose;
 
-    // Memoisierung ueber HashMaps (sparse), Schluessel als gepackter long-Wert.
-    //تذكر من الورقة: عندنا 8 دوال مختلفة تماماً (g, g̃, ĝ, g̃1, g̃2, f, f̃, f̂) - كل وحدة بتحسب "شي مختلف" (شروط مختلفة عن الغراف)
-    static Map<Long, BigInteger> memoG = new HashMap<>();
-    static Map<Long, BigInteger> memoGTilde = new HashMap<>();
-    static Map<Long, BigInteger> memoGHat = new HashMap<>();
-    static Map<Long, BigInteger> memoG1Tilde = new HashMap<>();
-    static Map<Long, BigInteger> memoG2Tilde = new HashMap<>();
-    static Map<Long, BigInteger> memoF = new HashMap<>();
-    static Map<Long, BigInteger> memoFTilde = new HashMap<>();
-    static Map<Long, BigInteger> memoFHat5 = new HashMap<>();
-    static Map<Integer, BigInteger> memoConn = new HashMap<>();
+    static BigInteger[] tableChordal;
+    static BigInteger[] tableChordalConn;
 
-    static final long BASE = 64; // n <= 30, also reicht Basis 64 sicher zum Packen der Argumente فينا نختار اي رقم تاني اكبر من ثلاثين 
-//هاد بالضبط زي تحويل الأرقام (a,b,c,d) لرقم وحيد "بنظام أساسه 64" (متل ما "234" بنظام أساسه 10):
-    static long key4(int a, int b, int c, int d) {
-        return ((a * BASE + b) * BASE + c) * BASE + d;
-    }
+    static BigInteger[][][][] tableG;
+    static BigInteger[][][][] tableGTilde;
+    static BigInteger[][][][] tableGHat;
 
-    static long key5(int a, int b, int c, int d, int e) {
-        return (((a * BASE + b) * BASE + c) * BASE + d) * BASE + e;
-    }
+    static BigInteger[][][] tableG1Tilde;
+    static BigInteger[][][] tableG2Tilde;
 
-    public static void main(String[] args) {
-        int maxN = 30;
+    static BigInteger[][][][] tableF;
+    static BigInteger[][][][] tableFTilde;
+    static BigInteger[][][][] tableFHat;      // 4-Parameter-Version
+    static BigInteger[][][][][] tableFHat5;   // 5-Parameter-Version (mit z)
 
-        chooseInit(maxN);
-
-        System.out.println("n\t c(n)\t\t\t Laufzeit (ms)");//اطبع "n"\t → اقفز لعمود جديد اطبع " c(n)"
-\t\t\t → اقفز 3 أعمدة (لأنو "c(n)" أقصر من الأرقام الكبيرة يلي رح تُطبع تحتها لاحقاً، فمنحتاج "مسافة أكبر" حتى يبقى العمود التالت مصفوف صح)
-اطبع " Laufzeit (ms)"
-    //بيحسب ويطبع كل قيم c(n)
-        for (int n = 1; n <= maxN; n++) {
-            W = maxN; // unbeschraenkte Cliquengroesse; einmalig fest fuer den ganzen Laufحكينا قبل شوي إنو W هي "حد أقصى لحجم الـ Clique
-            long start = System.currentTimeMillis();//هاي بتسجل "الوقت الحالي بالمللي ثانية
-            BigInteger result = chordalConn(n);//هاد "قلب" الحساب الفعلي! هون بننادي الدالة الرئيسية chordalConn(n) (يلي شرحناها سابقاً - بتستخدم كل الدوال الثمانية المتشابكة g, gTilde, إلخ) لحساب c(n) فعلياً لهاد القيمة المحددة من n.
-            long end = System.currentTimeMillis();//بعد" ما خلص الحساب - نسجل الوقت الحالي مرة تانية
-            System.out.println(n + "\t" + result + "\t" + (end - start));
-        }
-    }
-//تمام، هاد الدالة يلي بتحسب كل (Binomial Coefficients) مسبقاً - يعني قبل ما نبلش أي حساب فعلي بالخوارزمية. هاي طريقة ذكية ومعروفة كتير ببرمجة الديناميكية (Dynamic Programming) اسمها "مثلث باسكال" (Pascal's Triangle).
+    // ---------------------------------------------------------------
+    // Binomialkoeffizienten
+    // ---------------------------------------------------------------
     static void chooseInit(int n) {
-        choose = new BigInteger[n + 1][n + 1];//. كل خانة choose[m][k] رح تخزن قيمة
-        for (int m = 0; m <= n; m++) {//بتمشي على كل قيمة ممكنة لـ m (من 0 لـ n) - يعني "الصف" الحالي بمثلث باسكال
-            choose[m][0] = BigInteger.ONE;
-            for (int k = 1; k <= m; k++) {//العمود" الحالي بنفس الصف.
-                BigInteger a = choose[m - 1][k];
-                BigInteger b = choose[m - 1][k - 1];
-                choose[m][k] = (a == null ? BigInteger.ZERO : a).add(b);
-                //، choose[m-1][k] ممكن يكون خارج الحدود المنطقية (متلاً choose[-1][k] مش موجودة أصلاً بالمصفوفة!) - أو تكون قيمة "لسا ما انحسبت" (default null بجافا لأي عنصر BigInteger لسا ما انعين لو صراحة).
+        tableChoose = new BigInteger[n + 1][n + 1];
+        tableChoose[0][0] = BigInteger.ONE;
+        for (int m = 1; m <= n; m++) {
+            tableChoose[m][0] = BigInteger.ONE;
+            for (int k = 1; k <= m; k++) {
+                BigInteger left = (k <= m - 1) ? tableChoose[m - 1][k] : BigInteger.ZERO;
+                BigInteger right = tableChoose[m - 1][k - 1];
+                tableChoose[m][k] = left.add(right);
             }
         }
     }
 
     static BigInteger choose(int n, int k) {
-        if (n < 0 || k < 0 || k > n) return BigInteger.ZERO;//حالات "غير منطقية
-        return choose[n][k];
+        if (n < 0 || k < 0 || n < k) return BigInteger.ZERO;
+        return tableChoose[n][k];
     }
 
-    /** c(k): Anzahl zusammenhaengender beschrifteter chordaler Graphen auf k Knoten. */
+    // ---------------------------------------------------------------
+    // chordal_conn(k): Anzahl zusammenhängender beschrifteter
+    // chordaler Graphen auf k Knoten
+    // ---------------------------------------------------------------
     static BigInteger chordalConn(int k) {
-        if (k == 0) return BigInteger.ZERO;//: c(0) = 0 - مافي "غراف متصل" بصفر رؤوس
-        BigInteger cached = memoConn.get(k);
-    //t = "وقت التبخر" (evaporation time) - بكم "خطوة" بيتبخر كل الغراف (تذكر مفهوم evaporation sequence من الورقة - حذف كل الرؤوس simplicial دفعة وحدة، وتكرار)
-l = حجم آخر مجموعة رؤوس simplicial تتبخر (يعني LG(∅) بمصطلحات الورقة	
- ) = عدد الطرق لاختيار مين بالضبط هني الـ l رأس يلي رح يكونوا "آخر مجموعة تتبخر"
-f(t, 0, l, k-l) = عدد الطرق لبناء غراف بالتفاصيل المحددة (evaporation time=t، آخر مجموعة حجمها l، والباقي k-l رأس)
-        if (cached != null) return cached;
+        if (tableChordalConn[k] == null) {
+            tableChordalConn[k] = compChordalConn(k);
+        }
+        return tableChordalConn[k];
+    }
+
+    static BigInteger compChordalConn(int k) {
         BigInteger ans = BigInteger.ZERO;
         for (int t = 1; t <= k; t++) {
             for (int l = 1; l <= k; l++) {
                 ans = ans.add(choose(k, l).multiply(f(t, 0, l, k - l)));
             }
         }
-        memoConn.put(k, ans);
         return ans;
     }
 
-    static BigInteger g(int t, int x, int z, int k) {
-        long key = key4(t, x, z, k);
-        BigInteger cached = memoG.get(key);
-        if (cached != null) return cached;
-        BigInteger ans;
-        //t=0 يعني "بدون أي وقت للتبخر إطلاقاً" - يعني الغراف لازم يكون فاضي تماماً (بلا أي رأس زيادة عن X) من البداية، لأنو مافي وقت (t=0) نسمح لأي رأس يتبخر بيه.
-        if (t == 0) {
-            ans = (k == 0) ? BigInteger.ONE : BigInteger.ZERO;
-        } //kk = عدد الرؤوس يلي بتتبخر بالضبط عند الوقت t (يعني "بآخر لحظة مسموحة")
-g(t−1,x,z,k−kk) = عدد الطرق لبناء الباقي (k-kk رأس)، يلي بيتبخر بزمن ≤ t-1 (يعني أبكر من t)
-        else {
-            ans = BigInteger.ZERO;
-            for (int kk = 0; kk <= k; kk++) {
-                ans = ans.add(choose(k, kk).multiply(gTilde(t, x, z, kk)).multiply(g(t - 1, x, z, k - kk)));
-            }
+    // ---------------------------------------------------------------
+    // chordal(k): Anzahl aller beschrifteten chordalen Graphen auf k
+    // Knoten (auch nicht zusammenhängende)
+    // ---------------------------------------------------------------
+    static BigInteger chordal(int k) {
+        if (tableChordal[k] == null) {
+            tableChordal[k] = compChordal(k);
         }
-        memoG.put(key, ans);
+        return tableChordal[k];
+    }
+
+    static BigInteger compChordal(int k) {
+        if (k == 0) return BigInteger.ONE;
+        BigInteger ans = BigInteger.ZERO;
+        for (int kk = 1; kk <= k; kk++) {
+            ans = ans.add(choose(k - 1, kk - 1)
+                    .multiply(chordalConn(kk))
+                    .multiply(chordal(k - kk)));
+        }
         return ans;
     }
 
-    // gTilde(t,x,z,k): wie g, aber alle Komponenten von G\X verdunsten exakt bei t
+    // ---------------------------------------------------------------
+    // g(t,x,z,k)
+    // ---------------------------------------------------------------
+    static BigInteger g(int t, int x, int z, int k) {
+        if (tableG[t][x][z][k] == null) {
+            tableG[t][x][z][k] = compG(t, x, z, k);
+        }
+        return tableG[t][x][z][k];
+    }
+
+    static BigInteger compG(int t, int x, int z, int k) {
+        if (t == 0) return k == 0 ? BigInteger.ONE : BigInteger.ZERO;
+        if (x == 0) throw new IllegalStateException("g: x=0 mit t>0 ist undefiniert");
+        BigInteger ans = BigInteger.ZERO;
+        for (int kk = 0; kk <= k; kk++) {
+            ans = ans.add(choose(k, kk)
+                    .multiply(gTilde(t, x, z, kk))
+                    .multiply(g(t - 1, x, z, k - kk)));
+        }
+        return ans;
+    }
+
+    // ---------------------------------------------------------------
+    // gTilde(t,x,z,k)
+    // ---------------------------------------------------------------
     static BigInteger gTilde(int t, int x, int z, int k) {
-        long key = key4(t, x, z, k);
-        BigInteger cached = memoGTilde.get(key);
-        if (cached != null) return cached;
-        BigInteger ans;
-        if (k == 0) {
-            ans = BigInteger.ONE;
-        } else {
-            ans = BigInteger.ZERO;
-            for (int kk = 1; kk <= k; kk++) {
-                for (int xx = 1; xx <= x; xx++) {
-                    BigInteger term = choose(k - 1, kk - 1)
+        if (tableGTilde[t][x][z][k] == null) {
+            tableGTilde[t][x][z][k] = compGTilde(t, x, z, k);
+        }
+        return tableGTilde[t][x][z][k];
+    }
+
+    static BigInteger compGTilde(int t, int x, int z, int k) {
+        if (k == 0) return BigInteger.ONE;
+        if (x == 0) throw new IllegalStateException("gTilde: x=0 undefiniert");
+        BigInteger ans = BigInteger.ZERO;
+        for (int kk = 1; kk <= k; kk++) {
+            for (int xx = 1; xx <= x; xx++) {
+                BigInteger term = choose(k - 1, kk - 1)
                         .multiply(choose(x, xx).subtract(choose(z, xx)))
                         .multiply(g1Tilde(t, xx, kk))
                         .multiply(gTilde(t, x, z, k - kk));
-                    ans = ans.add(term);
-                }
-            }
-        }
-        memoGTilde.put(key, ans);
-        return ans;
-    }
-
-    // gHat(t,x,z,k): wie gTilde, aber keine Komponente sieht ganz X (xx < x statt xx <= x)
-    static BigInteger gHat(int t, int x, int z, int k) {
-        long key = key4(t, x, z, k);
-        BigInteger cached = memoGHat.get(key);
-        if (cached != null) return cached;
-        BigInteger ans;
-        if (k == 0) {
-            ans = BigInteger.ONE;
-        } else {
-            ans = BigInteger.ZERO;
-            for (int kk = 1; kk <= k; kk++) {
-                for (int xx = 1; xx < x; xx++) {
-                    BigInteger term = choose(k - 1, kk - 1)
-                        .multiply(choose(x, xx).subtract(choose(z, xx)))
-                        .multiply(g1Tilde(t, xx, kk))
-                        .multiply(gHat(t, x, z, k - kk));
-                    ans = ans.add(term);
-                }
-            }
-        }
-        memoGHat.put(key, ans);
-        return ans;
-    }
-
-    // g1Tilde(t,x,k): genau eine Komponente von G\X, verdunstet exakt bei t, sieht ganz X
-    static BigInteger g1Tilde(int t, int x, int k) {
-        long key = key4(t, x, 0, k);
-        BigInteger cached = memoG1Tilde.get(key);
-        if (cached != null) return cached;
-        BigInteger ans;
-        if (k == 0 || t == 0) {
-            ans = BigInteger.ZERO;
-        } else {
-            ans = BigInteger.ZERO;
-            for (int l = 1; l <= k; l++) {
-                ans = ans.add(choose(k, l).multiply(f(t, x, l, k - l)));
-            }
-        }
-        memoG1Tilde.put(key, ans);
-        return ans;
-    }
-
-    // g2Tilde(t,x,k): mindestens zwei Komponenten von G\X, jede sieht ganz X
-    static BigInteger g2Tilde(int t, int x, int k) {
-        long key = key4(t, x, 0, k);
-        BigInteger cached = memoG2Tilde.get(key);
-        if (cached != null) return cached;
-        BigInteger ans;
-        if (k == 0 || t == 0) {
-            ans = BigInteger.ZERO;
-        } else {
-            ans = BigInteger.ZERO;
-            for (int kk = 1; kk < k; kk++) {
-                BigInteger term = choose(k - 1, kk - 1)
-                    .multiply(g1Tilde(t, x, kk))
-                    .multiply(g1Tilde(t, x, k - kk).add(g2Tilde(t, x, k - kk)));
                 ans = ans.add(term);
             }
         }
-        memoG2Tilde.put(key, ans);
         return ans;
     }
 
-    // f(t,x,l,k): L fest, verdunstet exakt bei t, G\X zusammenhaengend
+    // ---------------------------------------------------------------
+    // gHat(t,x,z,k)
+    // ---------------------------------------------------------------
+    static BigInteger gHat(int t, int x, int z, int k) {
+        if (tableGHat[t][x][z][k] == null) {
+            tableGHat[t][x][z][k] = compGHat(t, x, z, k);
+        }
+        return tableGHat[t][x][z][k];
+    }
+
+    static BigInteger compGHat(int t, int x, int z, int k) {
+        if (k == 0) return BigInteger.ONE;
+        if (x == 0) throw new IllegalStateException("gHat: x=0 undefiniert");
+        BigInteger ans = BigInteger.ZERO;
+        for (int kk = 1; kk <= k; kk++) {
+            for (int xx = 1; xx < x; xx++) {
+                BigInteger term = choose(k - 1, kk - 1)
+                        .multiply(choose(x, xx).subtract(choose(z, xx)))
+                        .multiply(g1Tilde(t, xx, kk))
+                        .multiply(gHat(t, x, z, k - kk));
+                ans = ans.add(term);
+            }
+        }
+        return ans;
+    }
+
+    // ---------------------------------------------------------------
+    // g1Tilde(t,x,k)
+    // ---------------------------------------------------------------
+    static BigInteger g1Tilde(int t, int x, int k) {
+        if (tableG1Tilde[t][x][k] == null) {
+            tableG1Tilde[t][x][k] = compG1Tilde(t, x, k);
+        }
+        return tableG1Tilde[t][x][k];
+    }
+
+    static BigInteger compG1Tilde(int t, int x, int k) {
+        if (k == 0 || t == 0) return BigInteger.ZERO;
+        if (x == 0) throw new IllegalStateException("g1Tilde: x=0 undefiniert");
+        BigInteger ans = BigInteger.ZERO;
+        for (int l = 1; l <= k; l++) {
+            ans = ans.add(choose(k, l).multiply(f(t, x, l, k - l)));
+        }
+        return ans;
+    }
+
+    // ---------------------------------------------------------------
+    // g2Tilde(t,x,k)
+    // ---------------------------------------------------------------
+    static BigInteger g2Tilde(int t, int x, int k) {
+        if (tableG2Tilde[t][x][k] == null) {
+            tableG2Tilde[t][x][k] = compG2Tilde(t, x, k);
+        }
+        return tableG2Tilde[t][x][k];
+    }
+
+    static BigInteger compG2Tilde(int t, int x, int k) {
+        if (k == 0 || t == 0) return BigInteger.ZERO;
+        if (x == 0) throw new IllegalStateException("g2Tilde: x=0 undefiniert");
+        BigInteger ans = BigInteger.ZERO;
+        for (int kk = 1; kk < k; kk++) {
+            ans = ans.add(choose(k - 1, kk - 1)
+                    .multiply(g1Tilde(t, x, kk))
+                    .multiply(g1Tilde(t, x, k - kk).add(g2Tilde(t, x, k - kk))));
+        }
+        return ans;
+    }
+
+    // ---------------------------------------------------------------
+    // f(t,x,l,k)
+    // ---------------------------------------------------------------
     static BigInteger f(int t, int x, int l, int k) {
-        long key = key4(t, x, l, k);
-        BigInteger cached = memoF.get(key);
-        if (cached != null) return cached;
-        BigInteger ans;
-        if (x + l > W) {
-            ans = BigInteger.ZERO;
-        } else if (t == 0) {
-            ans = BigInteger.ZERO;
-        } else if (t == 1) {
-            ans = (k == 0) ? BigInteger.ONE : BigInteger.ZERO;
-        } else if (k == 0) {
-            ans = BigInteger.ZERO;
-        } else {
-            ans = BigInteger.ZERO;
-            for (int kk = 1; kk <= k; kk++) {
-                ans = ans.add(choose(k, kk).multiply(fTilde(t, x, l, kk)).multiply(g(t - 2, x + l, x, k - kk)));
-            }
+        if (tableF[t][x][l][k] == null) {
+            tableF[t][x][l][k] = compF(t, x, l, k);
         }
-        memoF.put(key, ans);
+        return tableF[t][x][l][k];
+    }
+
+    static BigInteger compF(int t, int x, int l, int k) {
+        if (x + l > w) return BigInteger.ZERO;
+        if (t == 0) return BigInteger.ZERO;
+        if (t == 1) return k == 0 ? BigInteger.ONE : BigInteger.ZERO;
+        if (k == 0) return BigInteger.ZERO;
+        BigInteger ans = BigInteger.ZERO;
+        for (int kk = 1; kk <= k; kk++) {
+            ans = ans.add(choose(k, kk)
+                    .multiply(fTilde(t, x, l, kk))
+                    .multiply(g(t - 2, x + l, x, k - kk)));
+        }
         return ans;
     }
 
-    // fTilde(t,x,l,k): wie f, aber alle Komponenten von G\(X u L) verdunsten exakt bei t-1
+    // ---------------------------------------------------------------
+    // fTilde(t,x,l,k)
+    // ---------------------------------------------------------------
     static BigInteger fTilde(int t, int x, int l, int k) {
-        long key = key4(t, x, l, k);
-        BigInteger cached = memoFTilde.get(key);
-        if (cached != null) return cached;
-        BigInteger ans;
-        if (t == 0 || t == 1 || k == 0) {
-            ans = BigInteger.ZERO;
-        } else {
-            ans = fHat5(t, x, x, l, k);
-            for (int kk = 1; kk < k; kk++) {
-                ans = ans.add(choose(k, kk).multiply(g1Tilde(t - 1, x + l, kk)).multiply(fHat5(t, x, x, l, k - kk)));
-            }
-            for (int kk = 1; kk <= k; kk++) {
-                ans = ans.add(choose(k, kk).multiply(g2Tilde(t - 1, x + l, kk)).multiply(gHat(t - 1, x + l, x, k - kk)));
-            }
+        if (tableFTilde[t][x][l][k] == null) {
+            tableFTilde[t][x][l][k] = compFTilde(t, x, l, k);
         }
-        memoFTilde.put(key, ans);
+        return tableFTilde[t][x][l][k];
+    }
+
+    static BigInteger compFTilde(int t, int x, int l, int k) {
+        if (t == 0 || t == 1 || k == 0) return BigInteger.ZERO;
+        BigInteger ans = BigInteger.ZERO;
+        ans = ans.add(fHat(t, x, l, k));
+        for (int kk = 1; kk < k; kk++) {
+            ans = ans.add(choose(k, kk)
+                    .multiply(g1Tilde(t - 1, x + l, kk))
+                    .multiply(fHat(t, x, l, k - kk)));
+        }
+        for (int kk = 1; kk <= k; kk++) {
+            ans = ans.add(choose(k, kk)
+                    .multiply(g2Tilde(t - 1, x + l, kk))
+                    .multiply(gHat(t - 1, x + l, x, k - kk)));
+        }
         return ans;
     }
 
-    // fHat(t,x,z,l,k): wie fTilde, aber keine Komponente sieht ganz X u L
-    static BigInteger fHat5(int t, int x, int z, int l, int k) {
-        long key = key5(t, x, z, l, k);
-        BigInteger cached = memoFHat5.get(key);
-        if (cached != null) return cached;
-        BigInteger ans;
-        if (t == 0 || t == 1 || k == 0) {
-            ans = BigInteger.ZERO;
-        } else {
-            ans = BigInteger.ZERO;
-            for (int kk = 1; kk <= k; kk++) {
-                for (int xx = 0; xx <= x; xx++) {
-                    for (int ll = 0; ll <= l; ll++) {
-                        if (xx + ll == 0 || xx + ll == x + l) continue;
-                        BigInteger prod = choose(k - 1, kk - 1).multiply(choose(l, ll));
-                        if (ll > 0) {
-                            prod = prod.multiply(choose(x, xx));
-                        } else {
-                            prod = prod.multiply(choose(x, xx).subtract(choose(z, xx)));
-                        }
-                        prod = prod.multiply(g1Tilde(t - 1, xx + ll, kk));
-                        if (ll < l) {
-                            prod = prod.multiply(fHat5(t, x + ll, z, l - ll, k - kk));
-                        } else {
-                            prod = prod.multiply(gHat(t - 1, x + ll, z, k - kk));
-                        }
-                        ans = ans.add(prod);
-                    }
+    // ---------------------------------------------------------------
+    // fHat(t,x,l,k) — 4-Parameter-Version, ruft 5-Parameter-Version
+    // mit z=x auf
+    // ---------------------------------------------------------------
+    static BigInteger fHat(int t, int x, int l, int k) {
+        if (tableFHat[t][x][l][k] == null) {
+            tableFHat[t][x][l][k] = compFHat(t, x, l, k);
+        }
+        return tableFHat[t][x][l][k];
+    }
+
+    static BigInteger compFHat(int t, int x, int l, int k) {
+        return fHat(t, x, x, l, k);
+    }
+
+    // ---------------------------------------------------------------
+    // fHat(t,x,z,l,k) — 5-Parameter-Version
+    // ---------------------------------------------------------------
+    static BigInteger fHat(int t, int x, int z, int l, int k) {
+        if (tableFHat5[t][x][z][l][k] == null) {
+            tableFHat5[t][x][z][l][k] = compFHat(t, x, z, l, k);
+        }
+        return tableFHat5[t][x][z][l][k];
+    }
+
+    static BigInteger compFHat(int t, int x, int z, int l, int k) {
+        if (t == 0 || t == 1 || k == 0) return BigInteger.ZERO;
+        BigInteger ans = BigInteger.ZERO;
+        for (int kk = 1; kk <= k; kk++) {
+            for (int xx = 0; xx <= x; xx++) {
+                for (int ll = 0; ll <= l; ll++) {
+                    if (xx + ll == 0 || xx + ll == x + l) continue;
+                    BigInteger prod = choose(k - 1, kk - 1).multiply(choose(l, ll));
+                    BigInteger xTerm = (ll > 0)
+                            ? choose(x, xx)
+                            : choose(x, xx).subtract(choose(z, xx));
+                    prod = prod.multiply(xTerm);
+                    prod = prod.multiply(g1Tilde(t - 1, xx + ll, kk));
+                    BigInteger rest = (ll < l)
+                            ? fHat(t, x + ll, z, l - ll, k - kk)
+                            : gHat(t - 1, x + ll, z, k - kk);
+                    prod = prod.multiply(rest);
+                    ans = ans.add(prod);
                 }
             }
         }
-        memoFHat5.put(key, ans);
         return ans;
+    }
+
+    // ---------------------------------------------------------------
+    // main
+    // ---------------------------------------------------------------
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        System.out.println("Erste Eingabe: Anzahl der Knoten n.");
+        System.out.println("Zweite Eingabe: obere Schranke w fuer die Cliquengroesse.");
+        System.out.println("(Fuer c(n)/a(n) OHNE Farbbeschraenkung einfach w = n eingeben.)");
+        int n = sc.nextInt();
+        w = sc.nextInt();
+
+        chooseInit(n);
+
+        tableChordal = new BigInteger[n + 1];
+        tableChordalConn = new BigInteger[n + 1];
+
+        tableG = new BigInteger[n + 1][n + 1][n + 1][n + 1];
+        tableGTilde = new BigInteger[n + 1][n + 1][n + 1][n + 1];
+        tableGHat = new BigInteger[n + 1][n + 1][n + 1][n + 1];
+
+        tableG1Tilde = new BigInteger[n + 1][n + 1][n + 1];
+        tableG2Tilde = new BigInteger[n + 1][n + 1][n + 1];
+
+        tableF = new BigInteger[n + 1][n + 1][n + 1][n + 1];
+        tableFTilde = new BigInteger[n + 1][n + 1][n + 1][n + 1];
+        tableFHat = new BigInteger[n + 1][n + 1][n + 1][n + 1];
+        tableFHat5 = new BigInteger[n + 1][n + 1][n + 1][n + 1][n + 1];
+
+        long start = System.currentTimeMillis();
+        BigInteger cResult = chordalConn(n);
+        BigInteger aResult = chordal(n);
+        long end = System.currentTimeMillis();
+
+        System.out.println();
+        System.out.println("Anzahl zusammenhaengender beschrifteter chordaler Graphen c(" + n + ") = " + cResult);
+        System.out.println("Anzahl aller beschrifteten chordalen Graphen a(" + n + ") = " + aResult);
+        System.out.println("Laufzeit: " + (end - start) + " ms");
     }
 }
