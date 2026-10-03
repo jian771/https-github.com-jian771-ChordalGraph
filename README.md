@@ -1,81 +1,46 @@
-import java.util.*;
 
-public class LexBFS {
-    
-    static int n = 5;
-    static boolean[][] adj = {
-        {false, true,  true,  false, false},
-        {true,  false, true,  true,  false},
-        {true,  true,  false, true,  true },
-        {false, true,  true,  false, true },
-        {false, false, true,  true,  false}
-    };
+# ChordalGraph
 
-    public static void main(String[] args) {
-        System.out.println("Graph mit " + n + " Knoten");
-        
-        int[] order = lexBFS();
-        System.out.println("LexBFS Reihenfolge:");
-        for (int i = 0; i < n; i++) {
-            System.out.print("v" + (order[i]+1) + " ");
-        }
-        
-        boolean isChordal = isChordal(order);
-        System.out.println("\nIst der Graph chordal? " + 
-            (isChordal ? "JA" : "NEIN"));
-    }
+Java-Implementierung zur Bachelorarbeit
+**„Ein Algorithmus zum Abzählen beschrifteter chordaler Graphen"**
+(Universität zu Lübeck, Institut für Theoretische Informatik,
+Betreuer: Prof. Dr. Maciej Liśkiewicz).
 
-    static int[] lexBFS() {
-        List<List<Integer>> partition = new ArrayList<>();
-        List<Integer> all = new ArrayList<>();
-        for (int i = 0; i < n; i++) all.add(i);
-        partition.add(all);
-        
-        int[] order = new int[n];
-        boolean[] visited = new boolean[n];
-        
-        for (int i = 0; i < n; i++) {
-            int v = partition.get(0).remove(0);
-            if (partition.get(0).isEmpty()) partition.remove(0);
-            order[i] = v;
-            visited[v] = true;
-            
-            List<List<Integer>> newPartition = new ArrayList<>();
-            for (List<Integer> group : partition) {
-                List<Integer> neighbors = new ArrayList<>();
-                List<Integer> nonNeighbors = new ArrayList<>();
-                for (int u : group) {
-                    if (!visited[u]) {
-                        if (adj[v][u]) neighbors.add(u);
-                        else nonNeighbors.add(u);
-                    }
-                }
-                if (!neighbors.isEmpty()) newPartition.add(neighbors);
-                if (!nonNeighbors.isEmpty()) newPartition.add(nonNeighbors);
-            }
-            partition = newPartition;
-        }
-        return order;
-    }
+## Inhalt
 
-    static boolean isChordal(int[] order) {
-        int[] pos = new int[n];
-        for (int i = 0; i < n; i++) pos[order[i]] = i;
-        
-        for (int i = 0; i < n; i++) {
-            int v = order[i];
-            List<Integer> rightNeighbors = new ArrayList<>();
-            for (int u = 0; u < n; u++) {
-                if (adj[v][u] && pos[u] > i) rightNeighbors.add(u);
-            }
-            if (!rightNeighbors.isEmpty()) {
-                int w = rightNeighbors.stream()
-                    .min(Comparator.comparingInt(x -> pos[x])).get();
-                for (int u : rightNeighbors) {
-                    if (u != w && !adj[w][u]) return false;
-                }
-            }
-        }
-        return true;
-    }
-}
+| Datei | Beschreibung |
+|---|---|
+| `Main.java` | Berechnet die Anzahl `c(n)` der zusammenhängenden beschrifteten chordalen Graphen auf `n` Knoten für `n = 1, …, maxN`. Java-Portierung der Referenzimplementierung (siehe unten). |
+| `LexBFS.java` | Beispielimplementierung von LexBFS (Partition Refinement) mit anschließender Prüfung, ob die Umkehrung der Reihenfolge eine perfekte Eliminationsordnung ist. Testet Zufallsgraphen für `n = 1, …, 30`. |
+
+> Hinweis: Die Datei `Main.java` enthält die Klasse `Main` und muss daher
+> auch genau so heißen.
+
+## Quellen
+
+Der Zählalgorithmus stammt von
+U. Hébert-Johnson, D. Lokshtanov und E. Vigoda:
+*Counting and Sampling Labeled Chordal Graphs in Polynomial Time*,
+ESA 2023. Die Java-Version ist eine Portierung der Referenzimplementierung
+der Autoren (C++): <https://github.com/uhebertj/chordal>.
+
+Wie die Referenzimplementierung verwendet auch diese Portierung die
+unoptimierte Variante des Algorithmus (ohne die Hilfsfunktion `h`), die
+`O(n^8)` statt `O(n^7)` arithmetische Operationen benötigt.
+
+## Ausführen
+
+Voraussetzung: ein JDK (getestet mit Java 21; installiert wurde Eclipse
+Temurin 25).
+
+```bash
+javac Main.java
+java Main
+```
+
+Die Obergrenze `n` wird im Quelltext von `Main.java` in der Zeile
+`int maxN = 35;` eingestellt. Bei größeren Werten steigen Laufzeit und
+Speicherbedarf deutlich; gegebenenfalls mehr Heap-Speicher angeben,
+z. B. `java -Xmx8g Main`.
+
+Die Ausgabe hat die Form
